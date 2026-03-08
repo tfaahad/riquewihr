@@ -116,10 +116,10 @@ Message.find().sort({ timestamp: -1 }).limit(50)
 
 
   // Handle reactions
-  const ALLOWED_EMOJIS = new Set(['🤍','😅','😂','😮','😢','😭']);
+  const ALLOWED_EMOJIS = new Set(['❤️','🙄','😂','😔','😢','😭']);
 
   socket.on('reaction:set', async ({ messageId, user, emoji }) => {
-  if (!['🤍', '😅', '😂', '😮', '😢','😭'].includes(emoji)) return;
+  if (!['❤️', '🙄', '😂', '😔', '😢','😭'].includes(emoji)) return;
 
   try {
     const updated = await Message.findByIdAndUpdate(
