@@ -536,8 +536,10 @@ socket.on('active:users', (users) => {
   // Show 💬 when alone, 💭 when multiple people
   if (activeUsers.size > 1) {
     activeIndicator.innerHTML = '💭';
+    activeIndicator.style.display = 'inline-flex';
   } else {
-    activeIndicator.innerHTML = '💬';
+    activeIndicator.innerHTML = '';
+    activeIndicator.style.display = 'none';
   }
   
   // Add blue glow when multiple people online (but don't override typing glow)
