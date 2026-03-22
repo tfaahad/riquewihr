@@ -3,7 +3,7 @@ const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
   cors: {
-    origin: "*",  // Allow all origins (update in production)
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
@@ -15,14 +15,14 @@ const cors = require('cors');
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Hardcoded MongoDB Connection (no .env)
+// Hardcoded MongoDB Connection
 const MONGODB_URI = 'mongodb+srv://tfaahad:PQp8HXCFtM0cSTcR@cluster0.bg2zfbj.mongodb.net/Riquewihr?retryWrites=true&w=majority';
 
 const mongooseOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 30000,  // 30 seconds
-  socketTimeoutMS: 45000,          // 45 seconds
+  serverSelectionTimeoutMS: 30000,
+  socketTimeoutMS: 45000,
   retryWrites: true,
   w: 'majority'
 };
@@ -50,28 +50,22 @@ const Message = mongoose.model('Message', new mongoose.Schema({
   text: String,
   timestamp: { type: Date, default: Date.now },
   reactions: {
-    type: Map, // key: username, value: emoji
+    type: Map,
     of: String,
     default: {}
   }
 }));
 
-
-
-
 // API route to fetch messages with pagination
 app.get('/messages', async (req, res) => {
   try {
-    // client can send ?before=timestamp&limit=50
     const before = req.query.before ? new Date(req.query.before) : new Date();
     const limit = parseInt(req.query.limit) || 50;
 
-    // fetch messages older than "before"
     const messages = await Message.find({ timestamp: { $lt: before } })
-      .sort({ timestamp: -1 }) // newest first
+      .sort({ timestamp: -1 })
       .limit(limit);
 
-    // return messages in ascending order (oldest first for display)
     res.json(messages.reverse());
   } catch (err) {
     console.error('Pagination error:', err);
@@ -79,95 +73,109 @@ app.get('/messages', async (req, res) => {
   }
 });
 
+// Track active users
+let activeUsers = new Map();
 
-// Socket.IO with error handling
+// Socket.IO
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   // Send latest 50 messages when user connects
-Message.find().sort({ timestamp: -1 }).limit(50)
-  .then(messages => {
-    // Convert Map to plain object for each message
-    const msgs = messages.map(m => {
-      const msgObj = m.toObject();
-      msgObj.reactions = Object.fromEntries(m.reactions);
-      return msgObj;
-    });
-    socket.emit('previous messages', msgs.reverse());
-  })
-  .catch(err => console.error('Fetch messages error:', err));
+  Message.find().sort({ timestamp: -1 }).limit(50)
+    .then(messages => {
+      const msgs = messages.map(m => {
+        const msgObj = m.toObject();
+        msgObj.reactions = Object.fromEntries(m.reactions);
+        return msgObj;
+      });
+      socket.emit('previous messages', msgs.reverse());
+    })
+    .catch(err => console.error('Fetch messages error:', err));
 
-
+  // Send current active users to the new user
+  socket.emit('active:users', Array.from(activeUsers.values()));
+  
+  // Handle username setting
+  socket.on('set username', (username) => {
+    if (username) {
+      activeUsers.set(socket.id, username);
+      io.emit('active:users', Array.from(activeUsers.values()));
+    }
+  });
 
   // Handle new messages
   socket.on('chat message', async (msg) => {
     if (!msg.name || !msg.text) return;
     
     try {
-  await new Message(msg).save();
-
-
-
-  io.emit('chat message', msg);  // Broadcast to all
-} catch (err) {
-  console.error('Save message error:', err);
-}
+      await new Message(msg).save();
+      io.emit('chat message', msg);
+    } catch (err) {
+      console.error('Save message error:', err);
+    }
   });
 
+  // Typing indicators
+  socket.on('typing:start', ({ user }) => {
+    socket.broadcast.emit('typing:start', { user });
+  });
+
+  socket.on('typing:stop', ({ user }) => {
+    socket.broadcast.emit('typing:stop', { user });
+  });
 
   // Handle reactions
   const ALLOWED_EMOJIS = new Set(['❤️','🙄','😂','😔','😢','😭']);
 
   socket.on('reaction:set', async ({ messageId, user, emoji }) => {
-  if (!['❤️', '🙄', '😂', '😔', '😢','😭'].includes(emoji)) return;
+    if (!ALLOWED_EMOJIS.has(emoji)) return;
 
-  try {
-    const updated = await Message.findByIdAndUpdate(
-      messageId,
-      { $set: { [`reactions.${user}`]: emoji } },
-      { new: true }
-    );
-
-    if (updated) {
-      io.emit('reaction:updated', {
+    try {
+      const updated = await Message.findByIdAndUpdate(
         messageId,
-        reactions: Object.fromEntries(updated.reactions) // ✅ changed
-      });
+        { $set: { [`reactions.${user}`]: emoji } },
+        { new: true }
+      );
+
+      if (updated) {
+        io.emit('reaction:updated', {
+          messageId,
+          reactions: Object.fromEntries(updated.reactions)
+        });
+      }
+    } catch (error) {
+      console.error('Error setting reaction:', error);
     }
-  } catch (error) {
-    console.error('Error setting reaction:', error);
-  }
-});
+  });
 
-// Reaction: Clear
-socket.on('reaction:clear', async ({ messageId, user }) => {
-  try {
-    const updated = await Message.findByIdAndUpdate(
-      messageId,
-      { $unset: { [`reactions.${user}`]: "" } },
-      { new: true }
-    );
-
-    if (updated) {
-      io.emit('reaction:updated', {
+  // Reaction: Clear
+  socket.on('reaction:clear', async ({ messageId, user }) => {
+    try {
+      const updated = await Message.findByIdAndUpdate(
         messageId,
-        reactions: Object.fromEntries(updated.reactions) // ✅ changed
-      });
+        { $unset: { [`reactions.${user}`]: "" } },
+        { new: true }
+      );
+
+      if (updated) {
+        io.emit('reaction:updated', {
+          messageId,
+          reactions: Object.fromEntries(updated.reactions)
+        });
+      }
+    } catch (error) {
+      console.error('Error clearing reaction:', error);
     }
-  } catch (error) {
-    console.error('Error clearing reaction:', error);
-  }
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+    activeUsers.delete(socket.id);
+    io.emit('active:users', Array.from(activeUsers.values()));
+  });
 });
 
-
-  socket.on('disconnect', () => console.log('User disconnected:', socket.id));
-});
-
-
-
-
-
-// Health check route (required for Render)
+// Health check route
 app.get('/health', (req, res) => res.sendStatus(200));
 
 // Serve frontend

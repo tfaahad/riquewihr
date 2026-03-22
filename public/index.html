@@ -214,6 +214,72 @@
   outline: none;
 }
 
+/* Status indicator styles */
+.status-indicator {
+  padding: 8px 15px;
+  background: #141822;
+  border-top: 1px solid #22293a;
+  border-bottom: 1px solid #22293a;
+  font-size: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 45px;
+}
+
+#activeIndicator {
+  transition: all 0.2s ease;
+  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+#activeIndicator.active {
+  text-shadow: 0 0 8px #5b8cff;
+  animation: pulseGlow 1.5s ease-in-out infinite;
+}
+
+
+
+@keyframes pulseGlow {
+  0%, 100% {
+    text-shadow: 0 0 0px #5b8cff;
+    opacity: 1;
+  }
+  50% {
+    text-shadow: 0 0 12px #5b8cff;
+    opacity: 0.8;
+  }
+}
+
+@keyframes fadePulse {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Typing glow - orange pulse */
+#activeIndicator.typing-glow {
+  text-shadow: 0 0 12px #ffa500;
+  animation: typingPulse 0.8s ease-in-out infinite;
+}
+
+@keyframes typingPulse {
+  0%, 100% {
+    text-shadow: 0 0 0px #ffa500;
+    opacity: 0.6;
+  }
+  50% {
+    text-shadow: 0 0 16px #ffa500;
+    opacity: 1;
+  }
+}
+
+
 </style>
 
 </head>
@@ -223,6 +289,9 @@
   💬
 </div>
     <div class="messages" id="messages"></div>
+    <div class="status-indicator">
+  <span id="activeIndicator">💭</span>
+</div>
     <form class="chat-input" id="form">
       <input id="messageInput" autocomplete="off" placeholder="Enter your text..." />
       <button type="submit">Send</button>
@@ -230,309 +299,380 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
-  <script>
-    const socket = io({
-      reconnection: true,
-      reconnectionAttempts: 5
-    });
+<script>
+  const socket = io({
+    reconnection: true,
+    reconnectionAttempts: 5
+  });
 
-    const form = document.getElementById('form');
-    const input = document.getElementById('messageInput');
-    const messages = document.getElementById('messages');
-
-
-    let username = localStorage.getItem("username");
-
-if (!username) {
-  username = prompt("Enter your name")?.trim() || "User";
-  localStorage.setItem("username", username);
-}
-    const EMOJIS = ['❤️','🙄','😂','😔','😢','😭'];
-let pickerEl = null;
-
-
-
-    function addMessage(msg) {
-  const msgDiv = document.createElement('div');
-  msgDiv.classList.add('message');
-  msgDiv.classList.add(msg.name === username ? 'sent' : 'received');
-  msgDiv.dataset.id = msg._id; // keep messageId for reactions
-
-  // Message content container
-  const contentDiv = document.createElement('div');
-  contentDiv.style.display = 'flex';
-  contentDiv.style.flexDirection = 'column';
+  const form = document.getElementById('form');
+  const input = document.getElementById('messageInput');
+  const messages = document.getElementById('messages');
+  const activeIndicator = document.getElementById('activeIndicator');
   
-  // Text node
-  const textNode = document.createElement('div');
-  textNode.textContent = msg.text;
-  textNode.style.marginBottom = '4px';
-  contentDiv.appendChild(textNode);
 
-  // Timestamp
-  const timeSpan = document.createElement('div');
-  timeSpan.classList.add('timestamp');
-  const date = new Date(msg.timestamp || Date.now());
-  const options = { hour: 'numeric', minute: 'numeric', hour12: true };
-  timeSpan.textContent = date.toLocaleTimeString([], options);
-  contentDiv.appendChild(timeSpan);
+  let username = localStorage.getItem("username");
 
-  // Reaction container
-  const reactionsDiv = document.createElement('div');
-  reactionsDiv.classList.add('reactions');
-  contentDiv.appendChild(reactionsDiv);
+  if (!username) {
+    username = prompt("Enter your name")?.trim() || "User";
+    localStorage.setItem("username", username);
+  }
+  
+  // Emit username to server AFTER socket is connected
+  socket.on('connect', () => {
+    socket.emit('set username', username);
+  });
+  
+  const EMOJIS = ['❤️','🙄','😂','😔','😢','😭'];
+  let pickerEl = null;
+  let typingTimeout = null;
+  let isTyping = false;
 
-  msgDiv.appendChild(contentDiv);
+  // Typing indicator logic
+  input.addEventListener('input', () => {
+    if (!isTyping && input.value.trim().length > 0) {
+      isTyping = true;
+      socket.emit('typing:start', { user: username });
+    }
+    
+    if (typingTimeout) clearTimeout(typingTimeout);
+    typingTimeout = setTimeout(() => {
+      if (isTyping) {
+        isTyping = false;
+        socket.emit('typing:stop', { user: username });
+      }
+    }, 1000);
+  });
 
-  // Toggle timestamp on click
-  msgDiv.addEventListener('click', (e) => {
-    // Don't toggle timestamp if clicking on a reaction
-    if (!e.target.closest('.reactions')) {
-      timeSpan.classList.toggle('show');
+  input.addEventListener('blur', () => {
+    if (isTyping) {
+      isTyping = false;
+      socket.emit('typing:stop', { user: username });
     }
   });
 
-  // Right-click → open emoji picker
-  msgDiv.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    showEmojiPicker(e.pageX, e.pageY, msg._id);
-  });
+  function addMessage(msg) {
+    const msgDiv = document.createElement('div');
+    msgDiv.classList.add('message');
+    msgDiv.classList.add(msg.name === username ? 'sent' : 'received');
+    msgDiv.dataset.id = msg._id;
 
-  // Touch events for mobile (long press)
-  let pressTimer;
-  msgDiv.addEventListener('touchstart', (e) => {
-    pressTimer = setTimeout(() => {
+    const contentDiv = document.createElement('div');
+    contentDiv.style.display = 'flex';
+    contentDiv.style.flexDirection = 'column';
+    
+    // Add name for received messages (optional - helps identify who is typing)
+    if (msg.name !== username) {
+      const nameSpan = document.createElement('div');
+      nameSpan.textContent = msg.name;
+      nameSpan.style.fontSize = '12px';
+      nameSpan.style.fontWeight = 'bold';
+      nameSpan.style.color = '#5b8cff';
+      nameSpan.style.marginBottom = '4px';
+      contentDiv.appendChild(nameSpan);
+    }
+    
+    const textNode = document.createElement('div');
+    textNode.textContent = msg.text;
+    textNode.style.marginBottom = '4px';
+    contentDiv.appendChild(textNode);
+
+        const timeSpan = document.createElement('div');
+    timeSpan.classList.add('timestamp');
+    const date = new Date(msg.timestamp || Date.now());
+    
+    // Store both time and date
+    const timeOptions = { hour: 'numeric', minute: 'numeric', hour12: true };
+    const timeString = date.toLocaleTimeString([], timeOptions);
+    
+    const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+    const dateString = date.toLocaleDateString([], dateOptions);
+    
+    // Initially show only time
+    timeSpan.textContent = timeString;
+    timeSpan.dataset.fullTimestamp = `${timeString} • ${dateString}`;
+    contentDiv.appendChild(timeSpan);
+
+    const reactionsDiv = document.createElement('div');
+    reactionsDiv.classList.add('reactions');
+    contentDiv.appendChild(reactionsDiv);
+
+    msgDiv.appendChild(contentDiv);
+
+        msgDiv.addEventListener('click', (e) => {
+      if (!e.target.closest('.reactions')) {
+        if (timeSpan.classList.contains('show')) {
+          // If showing, revert to just time
+          timeSpan.textContent = timeString;
+          timeSpan.classList.remove('show');
+        } else {
+          // If hidden, show full date and time
+          timeSpan.textContent = timeSpan.dataset.fullTimestamp;
+          timeSpan.classList.add('show');
+        }
+      }
+    });
+
+    msgDiv.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      const touch = e.touches[0];
-      showEmojiPicker(touch.clientX, touch.clientY, msg._id);
-    }, 500); // 500ms long press
-  });
+      showEmojiPicker(e.pageX, e.pageY, msg._id);
+    });
 
-  msgDiv.addEventListener('touchend', () => {
-    clearTimeout(pressTimer);
-  });
+    let pressTimer;
+    msgDiv.addEventListener('touchstart', (e) => {
+      pressTimer = setTimeout(() => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        showEmojiPicker(touch.clientX, touch.clientY, msg._id);
+      }, 500);
+    });
 
-  msgDiv.addEventListener('touchmove', () => {
-    clearTimeout(pressTimer);
-  });
+    msgDiv.addEventListener('touchend', () => {
+      clearTimeout(pressTimer);
+    });
 
-  // Render existing reactions (if any)
-  if (msg.reactions) {
-    renderReactions(msg._id, msg.reactions);
+    msgDiv.addEventListener('touchmove', () => {
+      clearTimeout(pressTimer);
+    });
+
+    if (msg.reactions) {
+      renderReactions(msg._id, msg.reactions);
+    }
+
+    messages.appendChild(msgDiv);
+    messages.scrollTop = messages.scrollHeight;
   }
 
-  messages.appendChild(msgDiv);
-  messages.scrollTop = messages.scrollHeight;
-}
+  function showEmojiPicker(x, y, messageId) {
+    if (pickerEl) pickerEl.remove();
 
-function showEmojiPicker(x, y, messageId) {
-  if (pickerEl) pickerEl.remove();
+    pickerEl = document.createElement('div');
+    pickerEl.classList.add('emoji-picker');
+    
+    EMOJIS.forEach(emoji => {
+      const btn = document.createElement('button');
+      btn.textContent = emoji;
+      btn.setAttribute('aria-label', `React with ${emoji}`);
+      btn.onclick = () => {
+        socket.emit('reaction:set', { messageId, user: username, emoji }, (res) => {
+          if (!res.ok) console.error("Failed to react:", res.error);
+        });
+        pickerEl.remove();
+        pickerEl = null;
+      };
+      pickerEl.appendChild(btn);
+    });
 
-  pickerEl = document.createElement('div');
-  pickerEl.classList.add('emoji-picker');
-  
-  // Create emoji buttons
-  EMOJIS.forEach(emoji => {
-    const btn = document.createElement('button');
-    btn.textContent = emoji;
-    btn.setAttribute('aria-label', `React with ${emoji}`);
-    btn.onclick = () => {
-      socket.emit('reaction:set', { messageId, user: username, emoji }, (res) => {
-        if (!res.ok) console.error("Failed to react:", res.error);
-      });
+    document.body.appendChild(pickerEl);
+    
+    setTimeout(() => {
+      document.addEventListener('click', closeAllPickers, { once: true });
+    }, 0);
+    
+    pickerEl.addEventListener('keydown', (e) => {
+      const buttons = pickerEl.querySelectorAll('button');
+      const currentIndex = Array.from(buttons).indexOf(document.activeElement);
+      
+      if (e.key === 'ArrowRight') {
+        buttons[Math.min(currentIndex + 1, buttons.length - 1)]?.focus();
+      } else if (e.key === 'ArrowLeft') {
+        buttons[Math.max(currentIndex - 1, 0)]?.focus();
+      } else if (e.key === 'Escape') {
+        closeAllPickers();
+      }
+    });
+
+    setTimeout(() => {
+      const firstButton = pickerEl.querySelector('button');
+      if (firstButton) firstButton.focus();
+    }, 0);
+  }
+
+  function renderReactions(messageId, reactions) {
+    const msgDiv = document.querySelector(`.message[data-id="${messageId}"]`);
+    if (!msgDiv) return;
+    const reactionsDiv = msgDiv.querySelector('.reactions');
+    reactionsDiv.innerHTML = '';
+
+    const counts = {};
+    for (const [user, emoji] of Object.entries(reactions)) {
+      counts[emoji] = (counts[emoji] || 0) + 1;
+    }
+
+    Object.entries(counts).forEach(([emoji, count]) => {
+      const span = document.createElement('span');
+      span.textContent = count > 1 ? `${emoji} ${count}` : emoji;
+      
+      if (reactions[username] === emoji) {
+        span.classList.add('user-reaction');
+      }
+      
+      span.classList.add('added');
+      setTimeout(() => span.classList.remove('added'), 300);
+      
+      if (reactions[username] === emoji) {
+        span.onclick = (e) => {
+          e.stopPropagation();
+          socket.emit('reaction:clear', { messageId, user: username }, (res) => {
+            if (!res.ok) console.error("Failed to remove reaction:", res.error);
+          });
+        };
+      } else {
+        span.onclick = (e) => {
+          e.stopPropagation();
+          socket.emit('reaction:set', { messageId, user: username, emoji }, (res) => {
+            if (!res.ok) console.error("Failed to react:", res.error);
+          });
+        };
+      }
+      
+      reactionsDiv.appendChild(span);
+    });
+  }
+
+  function closeAllPickers() {
+    if (pickerEl) {
       pickerEl.remove();
       pickerEl = null;
-    };
-    pickerEl.appendChild(btn);
+    }
+  }
+
+  // Active users tracking - just 💭 with blue glow when multiple people
+  let activeUsers = new Set();
+  let typingGlowTimeout = null;
+  
+  socket.on('active:users', (users) => {
+    activeUsers = new Set(users);
+    // Always show just 💭
+    activeIndicator.innerHTML = '💭';
+    
+    // Add blue glow when multiple people online (but don't override typing glow)
+    if (activeUsers.size > 1 && !activeIndicator.classList.contains('typing-glow')) {
+      activeIndicator.classList.add('active');
+    } else if (activeUsers.size <= 1 && !activeIndicator.classList.contains('typing-glow')) {
+      activeIndicator.classList.remove('active');
+    }
   });
 
-  document.body.appendChild(pickerEl);
+  // Typing indicators - make 💭 glow orange when others type
+  let typingUsers = new Set();
   
-
-  // Close picker on outside click
-setTimeout(() => {
-  document.addEventListener('click', closeAllPickers, { once: true });
-}, 0);
+  socket.on('typing:start', ({ user }) => {
+    if (user !== username) {
+      typingUsers.add(user);
+      
+      // Remove blue active glow if present, add orange typing glow
+      activeIndicator.classList.remove('active');
+      activeIndicator.classList.add('typing-glow');
+      
+      // Clear existing timeout
+      if (typingGlowTimeout) clearTimeout(typingGlowTimeout);
+    }
+  });
   
-  // Add keyboard navigation
-  pickerEl.addEventListener('keydown', (e) => {
-    const buttons = pickerEl.querySelectorAll('button');
-    const currentIndex = Array.from(buttons).indexOf(document.activeElement);
+  socket.on('typing:stop', ({ user }) => {
+    typingUsers.delete(user);
     
-    if (e.key === 'ArrowRight') {
-      buttons[Math.min(currentIndex + 1, buttons.length - 1)]?.focus();
-    } else if (e.key === 'ArrowLeft') {
-      buttons[Math.max(currentIndex - 1, 0)]?.focus();
-    } else if (e.key === 'Escape') {
+    // If no one is typing anymore
+    if (typingUsers.size === 0) {
+      activeIndicator.classList.remove('typing-glow');
+      
+      // Re-add blue glow if multiple people are online
+      if (activeUsers.size > 1) {
+        activeIndicator.classList.add('active');
+      }
+      
+      if (typingGlowTimeout) clearTimeout(typingGlowTimeout);
+    } else {
+      // Set timeout to remove glow after 1.5 seconds of no typing events
+      typingGlowTimeout = setTimeout(() => {
+        if (typingUsers.size === 0) {
+          activeIndicator.classList.remove('typing-glow');
+          if (activeUsers.size > 1) {
+            activeIndicator.classList.add('active');
+          }
+        }
+      }, 1500);
+    }
+  });
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (message) {
+      // Stop typing indicator when sending
+      if (isTyping) {
+        socket.emit('typing:stop', { user: username });
+        isTyping = false;
+        if (typingTimeout) clearTimeout(typingTimeout);
+      }
+      socket.emit('chat message', { 
+        name: username, 
+        text: message 
+      });
+      input.value = '';
+    }
+  });
+
+  let oldestTimestamp = null;
+  let loading = false;
+
+  socket.on('previous messages', (msgs) => {
+    messages.innerHTML = '';
+    msgs.forEach(msg => {
+      msg.reactions = msg.reactions ? Object.fromEntries(Object.entries(msg.reactions)) : {};
+      addMessage(msg);
+    });
+    if (msgs.length > 0) {
+      oldestTimestamp = msgs[0].timestamp;
+    }
+  });
+
+  messages.addEventListener('scroll', async () => {
+    if (messages.scrollTop === 0 && !loading && oldestTimestamp) {
+      loading = true;
+      try {
+        const res = await fetch(`/messages?before=${oldestTimestamp}&limit=50`);
+        const olderMessages = await res.json();
+        if (olderMessages.length > 0) {
+          const prevHeight = messages.scrollHeight;
+          olderMessages.forEach(msg => {
+            addMessage(msg);
+          });
+          oldestTimestamp = olderMessages[0].timestamp;
+          messages.scrollTop = messages.scrollHeight - prevHeight;
+        }
+      } catch (err) {
+        console.error("Error fetching older messages:", err);
+      }
+      loading = false;
+    }
+  });
+
+  socket.on('chat message', (msg) => {
+    addMessage(msg);
+  });
+
+  socket.onAny((event, ...args) => {
+    console.log('Socket event:', event, args);
+  });
+
+  socket.on('reaction:updated', ({ messageId, reactions }) => {
+    renderReactions(messageId, reactions);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (pickerEl && !pickerEl.contains(e.target)) {
       closeAllPickers();
     }
   });
 
-  // Focus first button when picker opens
-  setTimeout(() => {
-    const firstButton = pickerEl.querySelector('button');
-    if (firstButton) firstButton.focus();
-  }, 0);
-}
-
-function renderReactions(messageId, reactions) {
-  const msgDiv = document.querySelector(`.message[data-id="${messageId}"]`);
-  if (!msgDiv) return;
-  const reactionsDiv = msgDiv.querySelector('.reactions');
-  reactionsDiv.innerHTML = '';
-
-  // Group by emoji → count
-  const counts = {};
-  for (const [user, emoji] of Object.entries(reactions)) {
-    counts[emoji] = (counts[emoji] || 0) + 1;
-  }
-
-  Object.entries(counts).forEach(([emoji, count]) => {
-    const span = document.createElement('span');
-    span.textContent = count > 1 ? `${emoji} ${count}` : emoji;
-    
-    // Check if this is the current user's reaction
-    if (reactions[username] === emoji) {
-      span.classList.add('user-reaction');
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && pickerEl) {
+      closeAllPickers();
     }
-    
-    // Add animation for new reactions
-    span.classList.add('added');
-    setTimeout(() => span.classList.remove('added'), 300);
-    
-    // Add click to remove own reaction
-    if (reactions[username] === emoji) {
-      span.onclick = (e) => {
-        e.stopPropagation();
-        socket.emit('reaction:clear', { messageId, user: username }, (res) => {
-          if (!res.ok) console.error("Failed to remove reaction:", res.error);
-        });
-      };
-    } else {
-      // Add click to add the same reaction (if not already user's reaction)
-      span.onclick = (e) => {
-        e.stopPropagation();
-        socket.emit('reaction:set', { messageId, user: username, emoji }, (res) => {
-          if (!res.ok) console.error("Failed to react:", res.error);
-        });
-      };
-    }
-    
-    reactionsDiv.appendChild(span);
   });
-}
-
-// Helper function to close any open picker
-function closeAllPickers() {
-  if (pickerEl) {
-    pickerEl.remove();
-    pickerEl = null;
-  }
-}
-
-// Add click outside to close picker
-document.addEventListener('click', (e) => {
-  if (pickerEl && !pickerEl.contains(e.target)) {
-    closeAllPickers();
-  }
-});
-
-// Add escape key to close picker
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && pickerEl) {
-    closeAllPickers();
-  }
-});
-
-
-
-
-    form.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const message = input.value.trim();
-      if (message) {
-        socket.emit('chat message', { 
-          name: username, 
-          text: message 
-        });
-        input.value = '';
-      }
-    });
-
-    let oldestTimestamp = null;
-let loading = false;
-
-socket.on('previous messages', (msgs) => {
-  messages.innerHTML = '';
-
-  msgs.forEach(msg => {
-    // Convert reactions Map (from MongoDB) to plain object
-    msg.reactions = msg.reactions ? Object.fromEntries(Object.entries(msg.reactions)) : {};
-    addMessage(msg);
-  });
-
-  if (msgs.length > 0) {
-    oldestTimestamp = msgs[0].timestamp; // save oldest
-  }
-});
-
-// Infinite scroll: detect scroll to top
-messages.addEventListener('scroll', async () => {
-  if (messages.scrollTop === 0 && !loading && oldestTimestamp) {
-    loading = true;
-
-    try {
-      const res = await fetch(`/messages?before=${oldestTimestamp}&limit=50`);
-      const olderMessages = await res.json();
-
-      if (olderMessages.length > 0) {
-        // Remember current scroll height
-        const prevHeight = messages.scrollHeight;
-
-        // Prepend older messages
-olderMessages.forEach(msg => {
-  addMessage(msg); // ✅ This will properly set up the message with all features
-});
-
-        // Update oldest timestamp
-        oldestTimestamp = olderMessages[0].timestamp;
-
-        // Keep scroll in same position
-        messages.scrollTop = messages.scrollHeight - prevHeight;
-      }
-    } catch (err) {
-      console.error("Error fetching older messages:", err);
-    }
-
-    loading = false;
-  }
-});
-
-
-    socket.on('chat message', (msg) => {
-      addMessage(msg);
-    });
-
-    socket.onAny((event, ...args) => {
-      console.log('Socket event:', event, args);
-    });
-
-socket.on('reaction:updated', ({ messageId, reactions }) => {
-  renderReactions(messageId, reactions);
-});
-
-
-
-  </script>
-
-  <script>
-    window.addEventListener('resize', () => {
-      const chatInput = document.querySelector('.chat-input');
-      if (window.innerHeight < 500) {
-        chatInput.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
-    });
-  </script>
+</script>
 
 </body>
 </html>
