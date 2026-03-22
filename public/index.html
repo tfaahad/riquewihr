@@ -28,17 +28,21 @@
   }
 
   .chat-header {
-    background-color: #141822;
-    padding: 15px;
-    color: #e6eaf2;
-    font-size: 18px;
-    font-weight: bold;
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    border-bottom: 1px solid #22293a;
-  }
+  background-color: #141822;
+  padding: 15px;
+  color: #e6eaf2;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid #22293a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
 
   .messages {
     flex: 1;
@@ -214,18 +218,6 @@
   outline: none;
 }
 
-/* Status indicator styles */
-.status-indicator {
-  padding: 8px 15px;
-  background: #141822;
-  border-top: 1px solid #22293a;
-  border-bottom: 1px solid #22293a;
-  font-size: 14px;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  min-height: 45px;
-}
 
 #activeIndicator {
   transition: all 0.2s ease;
@@ -264,7 +256,7 @@
 
 /* Typing glow - orange pulse */
 #activeIndicator.typing-glow {
-  text-shadow: 0 0 12px #ffa500;
+  text-shadow: 0 0 16px #ffa500;
   animation: typingPulse 0.8s ease-in-out infinite;
 }
 
@@ -274,7 +266,7 @@
     opacity: 0.6;
   }
   50% {
-    text-shadow: 0 0 16px #ffa500;
+    text-shadow: 0 0 18px #ffa500;
     opacity: 1;
   }
 }
@@ -285,13 +277,10 @@
 </head>
 <body>
   <div class="chat-container">
-    <div class="chat-header">
-  💬
+   <div class="chat-header">
+  <span id="activeIndicator">💬</span>
 </div>
-    <div class="messages" id="messages"></div>
-    <div class="status-indicator">
-  <span id="activeIndicator">💭</span>
-</div>
+<div class="messages" id="messages"></div>
     <form class="chat-input" id="form">
       <input id="messageInput" autocomplete="off" placeholder="Enter your text..." />
       <button type="submit">Send</button>
@@ -541,18 +530,23 @@
   let activeUsers = new Set();
   let typingGlowTimeout = null;
   
-  socket.on('active:users', (users) => {
-    activeUsers = new Set(users);
-    // Always show just 💭
+socket.on('active:users', (users) => {
+  activeUsers = new Set(users);
+  
+  // Show 💬 when alone, 💭 when multiple people
+  if (activeUsers.size > 1) {
     activeIndicator.innerHTML = '💭';
-    
-    // Add blue glow when multiple people online (but don't override typing glow)
-    if (activeUsers.size > 1 && !activeIndicator.classList.contains('typing-glow')) {
-      activeIndicator.classList.add('active');
-    } else if (activeUsers.size <= 1 && !activeIndicator.classList.contains('typing-glow')) {
-      activeIndicator.classList.remove('active');
-    }
-  });
+  } else {
+    activeIndicator.innerHTML = '💬';
+  }
+  
+  // Add blue glow when multiple people online (but don't override typing glow)
+  if (activeUsers.size > 1 && !activeIndicator.classList.contains('typing-glow')) {
+    activeIndicator.classList.add('active');
+  } else if (activeUsers.size <= 1 && !activeIndicator.classList.contains('typing-glow')) {
+    activeIndicator.classList.remove('active');
+  }
+});
 
   // Typing indicators - make 💭 glow orange when others type
   let typingUsers = new Set();
