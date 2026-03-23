@@ -272,6 +272,79 @@
 }
 
 
+/* Image message styling */
+.message img {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 12px;
+  margin-top: 5px;
+  cursor: pointer;
+  object-fit: cover;
+  transition: transform 0.2s;
+}
+
+.message img:hover {
+  transform: scale(1.02);
+}
+
+.image-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.95);
+  z-index: 2000;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+.image-preview img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.image-preview.show {
+  display: flex;
+}
+
+.upload-progress {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e2a44;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  z-index: 1000;
+  display: none;
+  gap: 10px;
+  align-items: center;
+}
+
+.upload-progress.show {
+  display: flex;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #5b8cff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+
 </style>
 
 </head>
@@ -281,11 +354,22 @@
   <span id="activeIndicator">💬</span>
 </div>
 <div class="messages" id="messages"></div>
-    <form class="chat-input" id="form">
-      <input id="messageInput" autocomplete="off" placeholder="Enter your text..." />
-      <button type="submit">Send</button>
-    </form>
+<div class="image-preview" id="imagePreview">
+  <img id="previewImg" src="" alt="Preview" />
+</div>
+
+<div class="upload-progress" id="uploadProgress">
+  <div class="spinner"></div>
+  <span>Uploading image...</span>
+</div>
+<form class="chat-input" id="form">
+  <input id="messageInput" autocomplete="off" placeholder="Someone is missing you..." />
+  <button type="button" id="imageBtn" style="background: #2a3954; margin-right: 2px;">📷</button>
+  <button type="submit">Send</button>
+</form>
   </div>
+
+  
 
   <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -340,7 +424,8 @@
     }
   });
 
-  function addMessage(msg) {
+
+    function addImageMessage(msg) {
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message');
     msgDiv.classList.add(msg.name === username ? 'sent' : 'received');
@@ -350,7 +435,115 @@
     contentDiv.style.display = 'flex';
     contentDiv.style.flexDirection = 'column';
     
-    // Add name for received messages (optional - helps identify who is typing)
+    if (msg.name !== username) {
+      const nameSpan = document.createElement('div');
+      nameSpan.textContent = msg.name;
+      nameSpan.style.fontSize = '12px';
+      nameSpan.style.fontWeight = 'bold';
+      nameSpan.style.color = '#5b8cff';
+      nameSpan.style.marginBottom = '4px';
+      contentDiv.appendChild(nameSpan);
+    }
+    
+    if (msg.text && msg.text.trim()) {
+      const textNode = document.createElement('div');
+      textNode.textContent = msg.text;
+      textNode.style.marginBottom = '4px';
+      contentDiv.appendChild(textNode);
+    }
+    
+    const img = document.createElement('img');
+    img.src = msg.imageUrl;
+    img.alt = 'Image';
+    img.loading = 'lazy';
+    
+       img.onclick = (e) => {
+      e.stopPropagation();
+      const previewImg = document.getElementById('previewImg');
+      const imagePreview = document.getElementById('imagePreview');
+      if (previewImg && imagePreview) {
+        previewImg.src = msg.imageUrl;
+        imagePreview.classList.add('show');
+      }
+    };
+    
+    contentDiv.appendChild(img);
+    
+    const timeSpan = document.createElement('div');
+    timeSpan.classList.add('timestamp');
+    const date = new Date(msg.timestamp);
+    const timeOptions = { hour: 'numeric', minute: 'numeric', hour12: true };
+    const timeString = date.toLocaleTimeString([], timeOptions);
+    const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+    const dateString = date.toLocaleDateString([], dateOptions);
+    timeSpan.textContent = timeString;
+    timeSpan.dataset.fullTimestamp = `${timeString} • ${dateString}`;
+    contentDiv.appendChild(timeSpan);
+
+    const reactionsDiv = document.createElement('div');
+    reactionsDiv.classList.add('reactions');
+    contentDiv.appendChild(reactionsDiv);
+
+    msgDiv.appendChild(contentDiv);
+
+    msgDiv.addEventListener('click', (e) => {
+      if (!e.target.closest('.reactions') && e.target !== img) {
+        if (timeSpan.classList.contains('show')) {
+          timeSpan.textContent = timeString;
+          timeSpan.classList.remove('show');
+        } else {
+          timeSpan.textContent = timeSpan.dataset.fullTimestamp;
+          timeSpan.classList.add('show');
+        }
+      }
+    });
+
+    msgDiv.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showEmojiPicker(e.pageX, e.pageY, msg._id);
+    });
+
+    let pressTimer;
+    msgDiv.addEventListener('touchstart', (e) => {
+      pressTimer = setTimeout(() => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        showEmojiPicker(touch.clientX, touch.clientY, msg._id);
+      }, 500);
+    });
+
+    msgDiv.addEventListener('touchend', () => {
+      clearTimeout(pressTimer);
+    });
+
+    msgDiv.addEventListener('touchmove', () => {
+      clearTimeout(pressTimer);
+    });
+
+    if (msg.reactions) {
+      renderReactions(msg._id, msg.reactions);
+    }
+
+    messages.appendChild(msgDiv);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+    function addMessage(msg) {
+    // Check if it's an image message
+    if (msg.imageUrl) {
+      addImageMessage(msg);
+      return;
+    }
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.classList.add('message');
+    msgDiv.classList.add(msg.name === username ? 'sent' : 'received');
+    msgDiv.dataset.id = msg._id;
+
+    const contentDiv = document.createElement('div');
+    contentDiv.style.display = 'flex';
+    contentDiv.style.flexDirection = 'column';
+    
     if (msg.name !== username) {
       const nameSpan = document.createElement('div');
       nameSpan.textContent = msg.name;
@@ -366,18 +559,13 @@
     textNode.style.marginBottom = '4px';
     contentDiv.appendChild(textNode);
 
-        const timeSpan = document.createElement('div');
+    const timeSpan = document.createElement('div');
     timeSpan.classList.add('timestamp');
-    const date = new Date(msg.timestamp || Date.now());
-    
-    // Store both time and date
+    const date = new Date(msg.timestamp);
     const timeOptions = { hour: 'numeric', minute: 'numeric', hour12: true };
     const timeString = date.toLocaleTimeString([], timeOptions);
-    
     const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
     const dateString = date.toLocaleDateString([], dateOptions);
-    
-    // Initially show only time
     timeSpan.textContent = timeString;
     timeSpan.dataset.fullTimestamp = `${timeString} • ${dateString}`;
     contentDiv.appendChild(timeSpan);
@@ -388,14 +576,12 @@
 
     msgDiv.appendChild(contentDiv);
 
-        msgDiv.addEventListener('click', (e) => {
+    msgDiv.addEventListener('click', (e) => {
       if (!e.target.closest('.reactions')) {
         if (timeSpan.classList.contains('show')) {
-          // If showing, revert to just time
           timeSpan.textContent = timeString;
           timeSpan.classList.remove('show');
         } else {
-          // If hidden, show full date and time
           timeSpan.textContent = timeSpan.dataset.fullTimestamp;
           timeSpan.classList.add('show');
         }
@@ -610,6 +796,71 @@ socket.on('active:users', (users) => {
     }
   });
 
+    // Image upload functionality
+  const imageBtn = document.getElementById('imageBtn');
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/jpeg,image/png,image/gif,image/webp';
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+
+  imageBtn.addEventListener('click', () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be less than 5MB');
+      fileInput.value = '';
+      return;
+    }
+    
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Please select a valid image (JPEG, PNG, GIF, or WEBP)');
+      fileInput.value = '';
+      return;
+    }
+    
+        const uploadProgress = document.getElementById('uploadProgress');
+    if (uploadProgress) uploadProgress.classList.add('show');
+    
+    if (isTyping) {
+      socket.emit('typing:stop', { user: username });
+      isTyping = false;
+      if (typingTimeout) clearTimeout(typingTimeout);
+    }
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const imageData = event.target.result;
+      
+      try {
+        socket.emit('chat image', {
+          name: username,
+          imageData: imageData,
+          text: ''
+        });
+      } catch (error) {
+        console.error('Upload error:', error);
+        alert('Failed to upload image. Please try again.');
+      } finally {
+        if (uploadProgress) uploadProgress.classList.remove('show');
+      }
+    };
+    
+    reader.onerror = () => {
+      if (uploadProgress) uploadProgress.classList.remove('show');
+      alert('Failed to read image file');
+    };
+    
+    reader.readAsDataURL(file);
+    fileInput.value = '';
+  });
+
   let oldestTimestamp = null;
   let loading = false;
 
@@ -649,6 +900,10 @@ socket.on('active:users', (users) => {
     addMessage(msg);
   });
 
+    socket.on('chat image', (msg) => {
+    addMessage(msg);
+  });
+
   socket.onAny((event, ...args) => {
     console.log('Socket event:', event, args);
   });
@@ -663,12 +918,35 @@ socket.on('active:users', (users) => {
     }
   });
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && pickerEl) {
-      closeAllPickers();
+   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (pickerEl) {
+        closeAllPickers();
+      }
+      const preview = document.getElementById('imagePreview');
+      const previewImg = document.getElementById('previewImg');
+      if (preview && previewImg && preview.classList.contains('show')) {
+        preview.classList.remove('show');
+        previewImg.src = '';
+      }
     }
   });
+
+    // Close image preview
+  const preview = document.getElementById('imagePreview');
+  const previewImg = document.getElementById('previewImg');
+  if (preview && previewImg) {
+    preview.addEventListener('click', () => {
+      preview.classList.remove('show');
+      previewImg.src = '';
+    });
+  }
+  
+ 
+
+
 </script>
+
 
 </body>
 </html>

@@ -10,13 +10,24 @@ const io = require('socket.io')(http, {
 const mongoose = require('mongoose');
 const path = require('path');
 const cors = require('cors');
+const cloudinary = require('cloudinary').v2;
 
 // Middleware
 app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Hardcoded MongoDB Connection
 const MONGODB_URI = 'mongodb+srv://tfaahad:PQp8HXCFtM0cSTcR@cluster0.bg2zfbj.mongodb.net/Riquewihr?retryWrites=true&w=majority';
+
+
+// Cloudinary Configuration
+cloudinary.config({
+  cloud_name: 'daflonltx',  // Replace with your actual cloud name
+  api_key: '424622119353354',         // Replace with your actual API key
+  api_secret: 'qgeT18_LsLzo_MOrPXGckip64AE'    // Replace with your actual API secret
+});
 
 const mongooseOptions = {
   useNewUrlParser: true,
@@ -47,7 +58,9 @@ mongoose.connection.on('disconnected', () => console.log('Mongoose disconnected'
 // Message Model
 const Message = mongoose.model('Message', new mongoose.Schema({
   name: String,
-  text: String,
+  text: { type: String, default: '' },
+  imageUrl: { type: String, default: null },
+  imagePublicId: { type: String, default: null },
   timestamp: { type: Date, default: Date.now },
   reactions: {
     type: Map,
@@ -112,6 +125,37 @@ io.on('connection', (socket) => {
       io.emit('chat message', msg);
     } catch (err) {
       console.error('Save message error:', err);
+    }
+  });
+
+    // Handle image messages with Cloudinary upload
+  socket.on('chat image', async (msg) => {
+    if (!msg.name || !msg.imageData) return;
+    
+    try {
+      // Upload to Cloudinary
+      const result = await cloudinary.uploader.upload(msg.imageData, {
+        folder: 'chat_images',
+        transformation: [
+          { width: 800, height: 800, crop: 'limit' },
+          { quality: 'auto' }
+        ]
+      });
+      
+      // Save to database with Cloudinary URL
+      const newMessage = new Message({
+        name: msg.name,
+        text: msg.text || '',
+        imageUrl: result.secure_url,
+        imagePublicId: result.public_id
+      });
+      await newMessage.save();
+      
+      const msgToSend = newMessage.toObject();
+      msgToSend.reactions = Object.fromEntries(newMessage.reactions);
+      io.emit('chat image', msgToSend);
+    } catch (err) {
+      console.error('Save image message error:', err);
     }
   });
 
